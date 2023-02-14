@@ -1,4 +1,5 @@
 # -*- coding:utf-8 -*-
+import math
 import os
 import logging
 import numpy as np
@@ -7,17 +8,134 @@ import onnxruntime
 from PIL import Image
 from osgeo import gdal
 
+from utils.normalize import normalize_
+from utils.fileio import list_from_file
 from utils.images_cutting import image_slide_cutting
 from utils.db_postprocessor import DBPostprocessor
-from utils.visualize import imshow_pred_boundary
 
-mean = np.array([123.675, 116.28, 103.53])
-std = np.array([58.395, 57.12, 57.375])
+from utils.visualize import imshow_pred_boundary
 
 Image.MAX_IMAGE_PIXELS = None
 
 
+class OCRSeg:
+    '''
+    文字识别onnx推理代码
+    '''
+    mean = np.array([0.5, 0.5, 0.5])
+    std = np.array([0.5, 0.5, 0.5])
+
+    def __init__(self, seg_model_path, key, device='CPUExecutionProvider'):
+        self.seg_model_path = seg_model_path
+        self.model = onnxruntime.InferenceSession(self.seg_model_path, providers=[device])
+        self.key = key
+
+        self.idx2char = []
+        for line_num, line in enumerate(list_from_file(self.key)):
+            line = line.strip('\r\n')
+            if len(line) > 1:
+                raise ValueError('Expect each line has 0 or 1 character, '
+                                 f'got {len(line)} characters '
+                                 f'at line {line_num + 1}')
+            if line != '':
+                self.idx2char.append(line)
+
+    def __call__(self, image):
+        image = image.transpose(1, 2, 0)
+        # 数据预处理
+        image = normalize_(image, self.mean, self.std)
+        ort_inputs = {'input': image}
+        pred = np.squeeze(self.model.run(['output'], ort_inputs)[0])
+        label_indexes, label_scores =self.tensor2idx(pred)
+        label_strings = self.idx2str(label_indexes)
+        # flatten batch results
+        results = []
+        for string, score in zip(label_strings, label_scores):
+            results.append(dict(text=string, score=score))
+
+        return results
+
+    def resize(self, img):
+        dst_height = 48
+        dst_min_width = 48
+        dst_max_width = 256
+
+        ori_height, ori_width = img.shape[:2]
+
+        new_width = math.ceil(float(dst_height) / ori_height * ori_width)
+        width_divisor = 4
+        # make sure new_width is an integral multiple of width_divisor.
+        if new_width % width_divisor != 0:
+            new_width = round(new_width / width_divisor) * width_divisor
+        new_width = max(dst_min_width, new_width)
+        resize_width = min(dst_max_width, new_width)
+        img_resize = cv2.resize(img, (resize_width, dst_height), )
+        if new_width < dst_max_width:
+            img_resize = cv2.copyMakeBorder(
+                img_resize,
+                0,
+                max(dst_height - img.shape[0], 0),
+                0,
+                max(dst_max_width - img.shape[1], 0),
+                value=0)
+        return img_resize
+
+    def tensor2idx(self, outputs):
+        """
+        Convert output tensor to text-index
+        Args:
+            outputs (tensor): model outputs with size: N * T * C
+            img_metas (list[dict]): Each dict contains one image info.
+        Returns:
+            indexes (list[list[int]]): [[1,2,3,3,4], [5,4,6,3,7]]
+            scores (list[list[float]]): [[0.9,0.8,0.95,0.97,0.94],
+                                         [0.9,0.9,0.98,0.97,0.96]]
+        """
+        batch_size = outputs.size(0)
+        ignore_indexes = [self.padding_idx]
+        indexes, scores = [], []
+        for idx in range(batch_size):
+            seq = outputs[idx, :, :]
+            max_value = np.max()
+            max_idx = np.argmax()
+            max_value, max_idx = torch.max(seq, -1)
+            str_index, str_score = [], []
+            output_index = max_idx.cpu().detach().numpy().tolist()
+            output_score = max_value.cpu().detach().numpy().tolist()
+            for char_index, char_score in zip(output_index, output_score):
+                if char_index in ignore_indexes:
+                    continue
+                if char_index == self.end_idx:
+                    break
+                str_index.append(char_index)
+                str_score.append(char_score)
+
+            indexes.append(str_index)
+            scores.append(str_score)
+
+        return indexes, scores
+
+    def idx2str(self, indexes):
+        """Convert indexes to text strings.
+
+        Args:
+            indexes (list[list[int]]): [[1,2,3,3,4], [5,4,6,3,7]].
+        Returns:
+            strings (list[str]): ['hello', 'world'].
+        """
+        assert isinstance(indexes, list)
+
+        strings = []
+        for index in indexes:
+            string = [self.idx2char[i] for i in index]
+            strings.append(''.join(string))
+
+        return strings
+
+
 class OCRInference:
+    mean = np.array([123.675, 116.28, 103.53])
+    std = np.array([58.395, 57.12, 57.375])
 
     def __init__(self, model_path, device='CPUExecutionProvider'):
         self.model_path = model_path
@@ -26,7 +144,7 @@ class OCRInference:
         self.dbnet_post = DBPostprocessor(text_repr_type='quad')
         self.model_name = "OCRInference"
         self.logger = self.get_logger()
-        self.logger.info('开始'.center(10, '*'))
+        self.logger.info('开始'.center(50, '='))
 
     def __call__(self, img_dir):
         img_path_list = self.get_images_path(img_dir)
@@ -34,7 +152,7 @@ class OCRInference:
         for img_path in img_path_list:
             img = self.read_image(img_path)
             output_dir = os.path.splitext(img_path)[0] + '.json'
-            self.sliding_window_detection(img,img_path, output_dir)
+            self.sliding_window_detection(img, img_path, output_dir)
 
     def get_images_path(self, img_dir):
         if os.path.isdir(img_dir):  # 目录
@@ -91,37 +209,12 @@ class OCRInference:
         # 数据预处理
         origin_shape = image.shape
         image = cv2.resize(image, (736, 736))
-        image = self.normalize_(image, mean, std)
+        image = normalize_(image, self.mean, self.std)
         ort_inputs = {'input': image}
         preds = np.squeeze(self.model.run(['output'], ort_inputs)[0])
         prob_map = preds[0, :, :]
         out = cv2.resize(prob_map, (origin_shape[0], origin_shape[1]))
         return out
-
-    def normalize_(self, img, mean, std, to_rgb=True):
-        """Inplace normalize an image with mean and std.
-
-        Args:
-            img (ndarray): Image to be normalized.
-            mean (ndarray): The mean to be used for normalize.
-            std (ndarray): The std to be used for normalize.
-            to_rgb (bool): Whether to convert to rgb.
-
-        Returns:
-            ndarray: The normalized image.
-        """
-        # cv2 inplace normalization does not accept uint8
-        img = img.copy().astype(np.float32)
-        assert img.dtype != np.uint8
-        mean = np.float64(mean.reshape(1, -1))
-        stdinv = 1 / np.float64(std.reshape(1, -1))
-        # if to_rgb:
-        #     cv2.cvtColor(img, cv2.COLOR_BGR2RGB, img)  # inplace
-        cv2.subtract(img, mean, img)  # inplace
-        cv2.multiply(img, stdinv, img)  # inplace
-
-        img = img.transpose(2, 0, 1)
-        return np.expand_dims(img, axis=0)
 
     def get_logger(self):
         """
@@ -143,6 +236,14 @@ class OCRInference:
 
 if __name__ == '__main__':
     model_path = 'E:/datasets/ocr/kqrs_train/train_data/DbNet_r18/end2end.onnx'
+    seg_model_path = 'E:/datasets/ocr/kqrs_train/train_data/DbNet_r18/end2end.onnx'
     img_dir = 'F:/workspace/mmocr_api/data/orc_test2.jpg'
-    ocr_infer = OCRInference(model_path)
-    ocr_infer(img_dir)
+    seg_img_path = 'F:/workspace/mmocr_api/data/王贵/3.png'
+    keys = 'E:/datasets/ocr/test_data/train_data/keys.txt'
+
+    # ocr_infer = OCRInference(model_path)
+    # ocr_infer(img_dir)
+
+    ocr_seg_infer = OCRSeg(seg_model_path, keys)
+    ocr_seg_infer(ocr_seg_infer)
+

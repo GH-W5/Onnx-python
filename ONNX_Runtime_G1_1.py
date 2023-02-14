@@ -26,9 +26,10 @@ def ort_ocr_seg():
         providers=['CUDAExecutionProvider']
     )  # notice
 
-    ort_output = ort_session.run(['output'], ort_inputs)[0]
+    ort_output = ort_session.run(['output'], ort_inputs)[0] #
+    pass
 
 
 if __name__ == '__main__':
-    ort_ocr_det()
-    # ort_ocr_seg()
+    # ort_ocr_det()
+    ort_ocr_seg()
