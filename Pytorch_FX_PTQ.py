@@ -1,17 +1,9 @@
 #first you need to pip install pyHessian 
-from re import L
-import numpy as np
-import torch 
+import torch
 import torch.onnx
-import onnx
-from torchvision import datasets, transforms
-from utils import * # get the dataset
-from density_plot import get_esd_plot # ESD plot
 from pytorchcv.model_provider import get_model as ptcv_get_model # model
 
-import matplotlib.pyplot as plt
-
-# get the model 
+# get the model
 model = ptcv_get_model("resnet20_cifar10", pretrained=True)
 # change the model to eval mode to disable running stats upate
 model.eval()
@@ -52,9 +44,9 @@ symbolic_traced : torch.fx.GraphModule = symbolic_trace(model)
 # 打印查看FX的IR
 print(symbolic_traced.graph)
 
-from torch.quantization import get_default_qat_qconfig, quantize_jit
+from torch.quantization import get_default_qat_qconfig
 from torch.quantization.quantize_fx import prepare_fx, convert_fx
-from torch.quantization import default_dynamic_qconfig, float_qparams_weight_only_qconfig
+
 qconfig=get_default_qat_qconfig("fbgem") #indicates the backend as sever
 # model.qconfig=get_default_qat_qconfig("fbgem") #indicates the backend as sever
 qconfig_dict={"":qconfig} #enable all quantization
