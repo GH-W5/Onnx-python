@@ -9,6 +9,7 @@
 文件说明：
     
 """
+import numpy as np
 
 
 def image_slide_cutting(width, height, window_size, overlapping_pixels=0, mode=0):
@@ -47,3 +48,44 @@ def image_slide_cutting(width, height, window_size, overlapping_pixels=0, mode=0
                 if x == list_x[-1]:
                     real_window_size_x = width - x
                 yield (x, y), (real_window_size_x, real_window_size_y)
+
+
+def crop_img(src_img, box, long_edge_pad_ratio=0.4, short_edge_pad_ratio=0.2):
+    """Crop text region with their bounding box.
+
+    Args:
+        src_img (np.array): The original image.
+        box (list[float | int]): Points of quadrangle.
+        long_edge_pad_ratio (float): Box pad ratio for long edge
+            corresponding to font size.
+        short_edge_pad_ratio (float): Box pad ratio for short edge
+            corresponding to font size.
+    """
+    assert len(box) == 8
+    assert 0. <= long_edge_pad_ratio < 1.0
+    assert 0. <= short_edge_pad_ratio < 1.0
+
+    h, w = src_img.RasterYSize, src_img.RasterXSize
+    points_x = np.clip(np.array(box[0::2]), 0, w)
+    points_y = np.clip(np.array(box[1::2]), 0, h)
+
+    box_width = np.max(points_x) - np.min(points_x)
+    box_height = np.max(points_y) - np.min(points_y)
+    font_size = min(box_height, box_width)
+
+    if box_height < box_width:
+        horizontal_pad = long_edge_pad_ratio * font_size
+        vertical_pad = short_edge_pad_ratio * font_size
+    else:
+        horizontal_pad = short_edge_pad_ratio * font_size
+        vertical_pad = long_edge_pad_ratio * font_size
+
+    left = np.clip(int(np.min(points_x) - horizontal_pad), 0, w)
+    top = np.clip(int(np.min(points_y) - vertical_pad), 0, h)
+    right = np.clip(int(np.max(points_x) + horizontal_pad), 0, w)
+    bottom = np.clip(int(np.max(points_y) + vertical_pad), 0, h)
+
+    # dst_img = src_img[top:bottom, left:right]
+    dst_img = src_img.ReadAsArray(int(left), int(top), int(box_width), int(box_height))
+
+    return dst_img

@@ -1,20 +1,20 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import os
 
-import mmcv
+# import mmcv
 
 
-def list_to_file(filename, lines):
-    """Write a list of strings to a text file.
-
-    Args:
-        filename (str): The output filename. It will be created/overwritten.
-        lines (list(str)): Data to be written.
-    """
-    mmcv.mkdir_or_exist(os.path.dirname(filename))
-    with open(filename, 'w', encoding='utf-8') as fw:
-        for line in lines:
-            fw.write(f'{line}\n')
+# def list_to_file(filename, lines):
+#     """Write a list of strings to a text file.
+#
+#     Args:
+#         filename (str): The output filename. It will be created/overwritten.
+#         lines (list(str)): Data to be written.
+#     """
+#     mmcv.mkdir_or_exist(os.path.dirname(filename))
+#     with open(filename, 'w', encoding='utf-8') as fw:
+#         for line in lines:
+#             fw.write(f'{line}\n')
 
 
 def list_from_file(filename, encoding='utf-8'):

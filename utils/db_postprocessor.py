@@ -5,8 +5,6 @@ import operator
 import cv2
 import numpy as np
 import pyclipper
-from numpy.fft import ifft
-from numpy.linalg import norm
 from shapely.geometry import Polygon
 
 

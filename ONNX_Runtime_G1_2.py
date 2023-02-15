@@ -1,7 +1,9 @@
 # -*- coding:utf-8 -*-
+import json
 import math
 import os
 import logging
+
 import numpy as np
 import cv2
 import onnxruntime
@@ -13,7 +15,8 @@ from utils.fileio import list_from_file
 from utils.images_cutting import image_slide_cutting
 from utils.db_postprocessor import DBPostprocessor
 
-from utils.visualize import imshow_pred_boundary
+# import mmcv
+# from utils.visualize import det_recog_show_result
 
 Image.MAX_IMAGE_PIXELS = None
 
@@ -29,7 +32,7 @@ class OCRSeg:
         self.seg_model_path = seg_model_path
         self.model = onnxruntime.InferenceSession(self.seg_model_path, providers=[device])
         self.key = key
-
+        self.padding_idx = None
         self.idx2char = []
         for line_num, line in enumerate(list_from_file(self.key)):
             line = line.strip('\r\n')
@@ -39,21 +42,28 @@ class OCRSeg:
                                  f'at line {line_num + 1}')
             if line != '':
                 self.idx2char.append(line)
+        start_end_token = '<BOS/EOS>'
+        unknown_token = '<UKN>'
+        self.idx2char.append(unknown_token)
+        self.idx2char.append(start_end_token)
+        self.end_idx = len(self.idx2char) - 1
 
     def __call__(self, image):
-        image = image.transpose(1, 2, 0)
+        image = image.transpose(1, 2, 0)[..., ::-1]
+        # mmcv.imshow(image, 'inference results')
         # 数据预处理
+        image = self.resize(image)
         image = normalize_(image, self.mean, self.std)
         ort_inputs = {'input': image}
-        pred = np.squeeze(self.model.run(['output'], ort_inputs)[0])
-        label_indexes, label_scores =self.tensor2idx(pred)
+        pred = self.model.run(['output'], ort_inputs)[0]
+        label_indexes, label_scores = self.tensor2idx(pred)
         label_strings = self.idx2str(label_indexes)
         # flatten batch results
         results = []
         for string, score in zip(label_strings, label_scores):
             results.append(dict(text=string, score=score))
 
-        return results
+        return results[0]
 
     def resize(self, img):
         dst_height = 48
@@ -74,11 +84,12 @@ class OCRSeg:
             img_resize = cv2.copyMakeBorder(
                 img_resize,
                 0,
-                max(dst_height - img.shape[0], 0),
+                max(dst_height - img_resize.shape[0], 0),
                 0,
-                max(dst_max_width - img.shape[1], 0),
+                max(dst_max_width - img_resize.shape[1], 0),
+                0,
                 value=0)
-        return img_resize
+        return img_resize / 255
 
     def tensor2idx(self, outputs):
         """
@@ -91,17 +102,16 @@ class OCRSeg:
             scores (list[list[float]]): [[0.9,0.8,0.95,0.97,0.94],
                                          [0.9,0.9,0.98,0.97,0.96]]
         """
-        batch_size = outputs.size(0)
+        batch_size = outputs.shape[0]
         ignore_indexes = [self.padding_idx]
         indexes, scores = [], []
         for idx in range(batch_size):
             seq = outputs[idx, :, :]
-            max_value = np.max()
-            max_idx = np.argmax()
-            max_value, max_idx = torch.max(seq, -1)
+            max_value = np.max(seq, axis=1)
+            max_idx = np.argmax(seq, axis=1)
             str_index, str_score = [], []
-            output_index = max_idx.cpu().detach().numpy().tolist()
-            output_score = max_value.cpu().detach().numpy().tolist()
+            output_index = max_idx.tolist()
+            output_score = max_value.tolist()
             for char_index, char_score in zip(output_index, output_score):
                 if char_index in ignore_indexes:
                     continue
@@ -137,9 +147,9 @@ class OCRInference:
     mean = np.array([123.675, 116.28, 103.53])
     std = np.array([58.395, 57.12, 57.375])
 
-    def __init__(self, model_path, device='CPUExecutionProvider'):
-        self.model_path = model_path
-        self.model = onnxruntime.InferenceSession(self.model_path, providers=[device])
+    def __init__(self, det_model_path, seg_model_path, keys, device='CPUExecutionProvider'):
+        self.det_model = onnxruntime.InferenceSession(det_model_path, providers=[device])
+        self.ocr_seg_infer = OCRSeg(seg_model_path, keys)
         # 文字定位模型后处理，获取预测的文本边界
         self.dbnet_post = DBPostprocessor(text_repr_type='quad')
         self.model_name = "OCRInference"
@@ -179,7 +189,7 @@ class OCRInference:
 
         return img
 
-    def sliding_window_detection(self, image_data, img_path, output_path, window_size=736, stride=736):
+    def sliding_window_detection(self, image_data, img_path, output_path, window_size=736):
         """
         滑动窗口对原始图像进行剪裁，并检测，将预测结果保存到指定文件夹
         :param image_array:
@@ -200,21 +210,55 @@ class OCRInference:
             mask_crop[y:y + window_size_y, x:x + window_size_x] = img_pred  # 拼接到mask
         boundaries = self.dbnet_post(mask_crop)
         # 可视化
-        labels = [0] * len(boundaries)
-        imshow_pred_boundary(img_path, boundaries, labels, 0.3, 'green', 'green',
-                             win_name='onnxruntime')
+        # labels = [0] * len(boundaries)
+        # imshow_pred_boundary(img_path, boundaries, labels, 0.3, 'green', 'green',
+        #                      win_name='onnxruntime')
+        img_e2e_res = []
+        for bbox in boundaries:
+            box_res = {}
+            box_res['box'] = [round(x) for x in bbox[:-1]]
+            box_res['box_score'] = float(bbox[-1])
+            min_x = min(bbox[0:-1:2])
+            min_y = min(bbox[1:-1:2])
+            max_x = max(bbox[0:-1:2])
+            max_y = max(bbox[1:-1:2])
+            box_img = image_data.ReadAsArray(int(min_x), int(min_y), int(max_x - min_x), int(max_y - min_y))
+            recog_result = self.ocr_seg_infer(box_img)
+            text = recog_result['text']
+            text_score = recog_result['score']
+            if isinstance(text_score, list):
+                text_score = sum(text_score) / max(1, len(text))
+            box_res['text'] = text
+            box_res['text_score'] = text_score
+            img_e2e_res.append(box_res)
+
+        # det_recog_show_result(img_path, img_e2e_res)
+        self.export_json(img_e2e_res, output_path)
+
+    def export_json(self, img_e2e_res, export):
+        all_res = []
+        for res in img_e2e_res:
+            print(res)
+            weight = res['text_score']
+            if weight > 1.0: weight = 1.0
+            all_res.append({
+                "pos": (np.asarray(res['box']).reshape([4, 2])).tolist(),
+                "value": res['text'],
+                "weight": weight
+            })
+        res_dic = {"result": all_res}
+        json_str = json.dumps(res_dic, indent=4, ensure_ascii=False)
+        with open(export, 'w', encoding='utf-8') as json_file:
+            json_file.write(json_str)
 
     def predict_img(self, image):
         image = image.transpose(1, 2, 0)
         # 数据预处理
-        origin_shape = image.shape
-        image = cv2.resize(image, (736, 736))
         image = normalize_(image, self.mean, self.std)
         ort_inputs = {'input': image}
-        preds = np.squeeze(self.model.run(['output'], ort_inputs)[0])
+        preds = np.squeeze(self.det_model.run(['output'], ort_inputs)[0])
         prob_map = preds[0, :, :]
-        out = cv2.resize(prob_map, (origin_shape[0], origin_shape[1]))
-        return out
+        return prob_map
 
     def get_logger(self):
         """
@@ -235,15 +279,15 @@ class OCRInference:
 
 
 if __name__ == '__main__':
-    model_path = 'E:/datasets/ocr/kqrs_train/train_data/DbNet_r18/end2end.onnx'
-    seg_model_path = 'E:/datasets/ocr/kqrs_train/train_data/DbNet_r18/end2end.onnx'
+    det_model_path = 'E:/datasets/ocr/kqrs_train/train_data/DbNet_r18/end2end.onnx'
+    seg_model_path = 'E:/datasets/ocr/kqrs_train/train_data/Sar_r31/end2end.onnx'
+    keys = 'E:/datasets/ocr/kqrs_train/train_data/Sar_r31/keys.txt'
     img_dir = 'F:/workspace/mmocr_api/data/orc_test2.jpg'
-    seg_img_path = 'F:/workspace/mmocr_api/data/王贵/3.png'
-    keys = 'E:/datasets/ocr/test_data/train_data/keys.txt'
+    seg_img_path = 'F:/workspace/mmocr_api/data/王贵/2.png'
 
-    # ocr_infer = OCRInference(model_path)
-    # ocr_infer(img_dir)
+    ocr_infer = OCRInference(det_model_path, seg_model_path, keys)
+    ocr_infer(img_dir)
 
-    ocr_seg_infer = OCRSeg(seg_model_path, keys)
-    ocr_seg_infer(ocr_seg_infer)
-
+    # ocr_seg_infer = OCRSeg(seg_model_path, keys)
+    # img = gdal.Open(seg_img_path)
+    # print(ocr_seg_infer(img.ReadAsArray()))

@@ -6,7 +6,7 @@ rd = np.random.RandomState(888)
 
 
 def ort_ocr_det():
-    matrix1 = rd.random((1, 3, 736, 736)).astype(np.float32)
+    matrix1 = rd.random((1, 3, 256, 180)).astype(np.float32)
 
     ort_inputs = {'input': matrix1}
     ort_session = onnxruntime.InferenceSession(
@@ -31,5 +31,5 @@ def ort_ocr_seg():
 
 
 if __name__ == '__main__':
-    # ort_ocr_det()
-    ort_ocr_seg()
+    ort_ocr_det()
+    # ort_ocr_seg()

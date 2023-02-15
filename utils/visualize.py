@@ -652,7 +652,7 @@ def det_recog_show_result(img, end2end_res, out_file=None):
     """
     img = mmcv.imread(img)
     boxes, texts = [], []
-    for res in end2end_res['result']:
+    for res in end2end_res:
         boxes.append(res['box'])
         texts.append(res['text'])
     box_vis_img = draw_polygons(img, boxes)
@@ -669,7 +669,7 @@ def det_recog_show_result(img, end2end_res, out_file=None):
 
     if out_file:
         mmcv.imwrite(out_img, out_file)
-
+    mmcv.imshow(out_img, 'inference results')
     return out_img
 
 
