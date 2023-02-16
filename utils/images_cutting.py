@@ -40,8 +40,10 @@ def image_slide_cutting(width, height, window_size, overlapping_pixels=0, mode=0
 
     else:  # 最后一行或列时，以实际剩余尺寸为准，大影像分块转矢量时使用
         assert overlapping_pixels == 0, 'mode值非0情况下，不需要重叠！'
-        for y in (list_y := list(range(0, height, stride_y))):
-            for x in (list_x := list(range(0, width, stride_x))):
+        list_y = list(range(0, height, stride_y))
+        list_x = list(range(0, width, stride_x))
+        for y in list_y:
+            for x in list_x:
                 real_window_size_x, real_window_size_y = window_size_x, window_size_y
                 if y == list_y[-1]:
                     real_window_size_y = height - y

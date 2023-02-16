@@ -6,13 +6,10 @@ import urllib
 import warnings
 
 import cv2
-import mmcv
 import numpy as np
-import torch
+# import torch
 from matplotlib import pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
-
-import mmocr.utils as utils
 
 
 def overlay_mask_img(img, mask):
@@ -47,11 +44,6 @@ def show_feature(features, names, to_uint8, out_file=None):
         out_file (str): The output file name. If set to None,
             the output image will be shown without saving.
     """
-    assert utils.is_type_list(features, np.ndarray)
-    assert utils.is_type_list(names, str)
-    assert utils.is_type_list(to_uint8, int)
-    assert utils.is_none_or_type(out_file, str)
-    assert utils.equal_len(features, names, to_uint8)
 
     num = len(features)
     row = col = math.ceil(math.sqrt(num))
@@ -76,7 +68,6 @@ def show_img_boundary(img, boundary):
         boundary (list[float or int]): The input boundary.
     """
     assert isinstance(img, np.ndarray)
-    assert utils.is_type_list(boundary, (int, float))
 
     cv2.polylines(
         img, [np.array(boundary).astype(np.int32).reshape(-1, 1, 2)],
@@ -85,212 +76,6 @@ def show_img_boundary(img, boundary):
         thickness=1)
     plt.imshow(img)
     plt.show()
-
-
-def show_pred_gt(preds,
-                 gts,
-                 show=False,
-                 win_name='',
-                 wait_time=0,
-                 out_file=None):
-    """Show detection and ground truth for one image.
-
-    Args:
-        preds (list[list[float]]): The detection boundary list.
-        gts (list[list[float]]): The ground truth boundary list.
-        show (bool): Whether to show the image.
-        win_name (str): The window name.
-        wait_time (int): The value of waitKey param.
-        out_file (str): The filename of the output.
-    """
-    assert utils.is_2dlist(preds)
-    assert utils.is_2dlist(gts)
-    assert isinstance(show, bool)
-    assert isinstance(win_name, str)
-    assert isinstance(wait_time, int)
-    assert utils.is_none_or_type(out_file, str)
-
-    p_xy = [p for boundary in preds for p in boundary]
-    gt_xy = [g for gt in gts for g in gt]
-
-    max_xy = np.max(np.array(p_xy + gt_xy).reshape(-1, 2), axis=0)
-
-    width = int(max_xy[0]) + 100
-    height = int(max_xy[1]) + 100
-
-    img = np.ones((height, width, 3), np.int8) * 255
-    pred_color = mmcv.color_val('red')
-    gt_color = mmcv.color_val('blue')
-    thickness = 1
-
-    for boundary in preds:
-        cv2.polylines(
-            img, [np.array(boundary).astype(np.int32).reshape(-1, 1, 2)],
-            True,
-            color=pred_color,
-            thickness=thickness)
-    for gt in gts:
-        cv2.polylines(
-            img, [np.array(gt).astype(np.int32).reshape(-1, 1, 2)],
-            True,
-            color=gt_color,
-            thickness=thickness)
-    if show:
-        mmcv.imshow(img, win_name, wait_time)
-    if out_file is not None:
-        mmcv.imwrite(img, out_file)
-
-    return img
-
-
-def imshow_pred_boundary(img,
-                         boundaries_with_scores,
-                         labels,
-                         score_thr=0,
-                         boundary_color='blue',
-                         text_color='blue',
-                         thickness=1,
-                         font_scale=0.5,
-                         show=True,
-                         win_name='',
-                         wait_time=0,
-                         out_file=None,
-                         show_score=False):
-    """Draw boundaries and class labels (with scores) on an image.
-
-    Args:
-        img (str or ndarray): The image to be displayed.
-        boundaries_with_scores (list[list[float]]): Boundaries with scores.
-        labels (list[int]): Labels of boundaries.
-        score_thr (float): Minimum score of boundaries to be shown.
-        boundary_color (str or tuple or :obj:`Color`): Color of boundaries.
-        text_color (str or tuple or :obj:`Color`): Color of texts.
-        thickness (int): Thickness of lines.
-        font_scale (float): Font scales of texts.
-        show (bool): Whether to show the image.
-        win_name (str): The window name.
-        wait_time (int): Value of waitKey param.
-        out_file (str or None): The filename of the output.
-        show_score (bool): Whether to show text instance score.
-    """
-    img = mmcv.imread(img)
-    assert isinstance(img, (str, np.ndarray))
-    assert utils.is_2dlist(boundaries_with_scores)
-    assert utils.is_type_list(labels, int)
-    assert utils.equal_len(boundaries_with_scores, labels)
-    if len(boundaries_with_scores) == 0:
-        warnings.warn('0 text found in ' + out_file)
-        return None
-
-    utils.valid_boundary(boundaries_with_scores[0])
-
-    scores = np.array([b[-1] for b in boundaries_with_scores])
-    inds = scores > score_thr
-    boundaries = [boundaries_with_scores[i][:-1] for i in np.where(inds)[0]]
-    scores = [scores[i] for i in np.where(inds)[0]]
-    labels = [labels[i] for i in np.where(inds)[0]]
-
-    boundary_color = mmcv.color_val(boundary_color)
-    text_color = mmcv.color_val(text_color)
-    font_scale = 0.5
-
-    for boundary, score in zip(boundaries, scores):
-        boundary_int = np.array(boundary).astype(np.int32)
-
-        cv2.polylines(
-            img, [boundary_int.reshape(-1, 1, 2)],
-            True,
-            color=boundary_color,
-            thickness=thickness)
-
-        if show_score:
-            label_text = f'{score:.02f}'
-            cv2.putText(img, label_text,
-                        (boundary_int[0], boundary_int[1] - 2),
-                        cv2.FONT_HERSHEY_COMPLEX, font_scale, text_color)
-    if show:
-        mmcv.imshow(img, win_name, wait_time)
-    if out_file is not None:
-        mmcv.imwrite(img, out_file)
-
-    return img
-
-
-def imshow_text_char_boundary(img,
-                              text_quads,
-                              boundaries,
-                              char_quads,
-                              chars,
-                              show=False,
-                              thickness=1,
-                              font_scale=0.5,
-                              win_name='',
-                              wait_time=-1,
-                              out_file=None):
-    """Draw text boxes and char boxes on img.
-
-    Args:
-        img (str or ndarray): The img to be displayed.
-        text_quads (list[list[int|float]]): The text boxes.
-        boundaries (list[list[int|float]]): The boundary list.
-        char_quads (list[list[list[int|float]]]): A 2d list of char boxes.
-            char_quads[i] is for the ith text, and char_quads[i][j] is the jth
-            char of the ith text.
-        chars (list[list[char]]). The string for each text box.
-        thickness (int): Thickness of lines.
-        font_scale (float): Font scales of texts.
-        show (bool): Whether to show the image.
-        win_name (str): The window name.
-        wait_time (int): Value of waitKey param.
-        out_file (str or None): The filename of the output.
-    """
-    assert isinstance(img, (np.ndarray, str))
-    assert utils.is_2dlist(text_quads)
-    assert utils.is_2dlist(boundaries)
-    assert utils.is_3dlist(char_quads)
-    assert utils.is_2dlist(chars)
-    assert utils.equal_len(text_quads, char_quads, boundaries)
-
-    img = mmcv.imread(img)
-    char_color = [mmcv.color_val('blue'), mmcv.color_val('green')]
-    text_color = mmcv.color_val('red')
-    text_inx = 0
-    for text_box, boundary, char_box, txt in zip(text_quads, boundaries,
-                                                 char_quads, chars):
-        text_box = np.array(text_box)
-        boundary = np.array(boundary)
-
-        text_box = text_box.reshape(-1, 2).astype(np.int32)
-        cv2.polylines(
-            img, [text_box.reshape(-1, 1, 2)],
-            True,
-            color=text_color,
-            thickness=thickness)
-        if boundary.shape[0] > 0:
-            cv2.polylines(
-                img, [boundary.reshape(-1, 1, 2)],
-                True,
-                color=text_color,
-                thickness=thickness)
-
-        for b in char_box:
-            b = np.array(b)
-            c = char_color[text_inx % 2]
-            b = b.astype(np.int32)
-            cv2.polylines(
-                img, [b.reshape(-1, 1, 2)], True, color=c, thickness=thickness)
-
-        label_text = ''.join(txt)
-        cv2.putText(img, label_text, (text_box[0, 0], text_box[0, 1] - 2),
-                    cv2.FONT_HERSHEY_COMPLEX, font_scale, text_color)
-        text_inx = text_inx + 1
-
-    if show:
-        mmcv.imshow(img, win_name, wait_time)
-    if out_file is not None:
-        mmcv.imwrite(img, out_file)
-
-    return img
 
 
 def tile_image(images):
@@ -345,7 +130,7 @@ def imshow_text_label(img,
     assert isinstance(win_name, str)
     assert isinstance(wait_time, int)
 
-    img = mmcv.imread(img)
+    img = cv2.imdecode(np.fromfile(img, dtype=np.uint8), cv2.IMREAD_COLOR)
 
     src_h, src_w = img.shape[:2]
     resize_height = 64
@@ -373,77 +158,11 @@ def imshow_text_label(img,
     img = tile_image(images)
 
     if show:
-        mmcv.imshow(img, win_name, wait_time)
+        imshow(img, win_name, wait_time)
     if out_file is not None:
-        mmcv.imwrite(img, out_file)
+        cv2.imwrite(img, out_file)
 
     return img
-
-
-def imshow_node(img,
-                result,
-                boxes,
-                idx_to_cls={},
-                show=False,
-                win_name='',
-                wait_time=-1,
-                out_file=None):
-
-    img = mmcv.imread(img)
-    h, w = img.shape[:2]
-
-    max_value, max_idx = torch.max(result['nodes'].detach().cpu(), -1)
-    node_pred_label = max_idx.numpy().tolist()
-    node_pred_score = max_value.numpy().tolist()
-
-    texts, text_boxes = [], []
-    for i, box in enumerate(boxes):
-        new_box = [[box[0], box[1]], [box[2], box[1]], [box[2], box[3]],
-                   [box[0], box[3]]]
-        Pts = np.array([new_box], np.int32)
-        cv2.polylines(
-            img, [Pts.reshape((-1, 1, 2))],
-            True,
-            color=(255, 255, 0),
-            thickness=1)
-        x_min = int(min([point[0] for point in new_box]))
-        y_min = int(min([point[1] for point in new_box]))
-
-        # text
-        pred_label = str(node_pred_label[i])
-        if pred_label in idx_to_cls:
-            pred_label = idx_to_cls[pred_label]
-        pred_score = '{:.2f}'.format(node_pred_score[i])
-        text = pred_label + '(' + pred_score + ')'
-        texts.append(text)
-
-        # text box
-        font_size = int(
-            min(
-                abs(new_box[3][1] - new_box[0][1]),
-                abs(new_box[1][0] - new_box[0][0])))
-        char_num = len(text)
-        text_box = [
-            x_min * 2, y_min, x_min * 2 + font_size * char_num, y_min,
-            x_min * 2 + font_size * char_num, y_min + font_size, x_min * 2,
-            y_min + font_size
-        ]
-        text_boxes.append(text_box)
-
-    pred_img = np.ones((h, w * 2, 3), dtype=np.uint8) * 255
-    pred_img = draw_texts_by_pil(
-        pred_img, texts, text_boxes, draw_box=False, on_ori_img=True)
-
-    vis_img = np.ones((h, w * 3, 3), dtype=np.uint8) * 255
-    vis_img[:, :w] = img
-    vis_img[:, w:] = pred_img
-
-    if show:
-        mmcv.imshow(vis_img, win_name, wait_time)
-    if out_file is not None:
-        mmcv.imwrite(vis_img, out_file)
-
-    return vis_img
 
 
 def gen_color():
@@ -650,7 +369,7 @@ def det_recog_show_result(img, end2end_res, out_file=None):
     Return:
         out_img (np.ndarray): Visualized image.
     """
-    img = mmcv.imread(img)
+    img = cv2.imdecode(np.fromfile(img, dtype=np.uint8), cv2.IMREAD_COLOR)
     boxes, texts = [], []
     for res in end2end_res:
         boxes.append(res['box'])
@@ -668,221 +387,30 @@ def det_recog_show_result(img, end2end_res, out_file=None):
     out_img[:, w:, :] = text_vis_img
 
     if out_file:
-        mmcv.imwrite(out_img, out_file)
-    mmcv.imshow(out_img, 'inference results')
+        cv2.imwrite(out_img, out_file)
+    imshow(out_img, 'inference results')
     return out_img
 
 
-def draw_edge_result(img, result, edge_thresh=0.5, keynode_thresh=0.5):
-    """Draw text and their relationship on empty images.
+def imshow(img, win_name: str = '', wait_time: int = 0):
+    """Show an image.
 
     Args:
-        img (np.ndarray): The original image.
-        result (dict): The result of model forward_test, including:
-            - img_metas (list[dict]): List of meta information dictionary.
-            - nodes (Tensor): Node prediction with size:
-                number_node * node_classes.
-            - edges (Tensor): Edge prediction with size: number_edge * 2.
-        edge_thresh (float): Score threshold for edge classification.
-        keynode_thresh (float): Score threshold for node
-            (``key``) classification.
-
-    Returns:
-        np.ndarray: The image with key, value and relation drawn on it.
+        img (str or ndarray): The image to be displayed.
+        win_name (str): The window name.
+        wait_time (int): Value of waitKey param.
     """
+    # x, y = img.shape[0:2]
+    # scale = 1024 / x
+    # img_resize = cv2.resize(img, (0, 0), fx=0.5, fy=0.5, interpolation=cv2.INTER_NEAREST)
+    cv2.imshow(win_name, img)
+    if wait_time == 0:  # prevent from hanging if windows was closed
+        while True:
+            ret = cv2.waitKey(1)
 
-    h, w = img.shape[:2]
-
-    vis_area_width = w // 3 * 2
-    vis_area_height = h
-    dist_key_to_value = vis_area_width // 2
-    dist_pair_to_pair = 30
-
-    bbox_x1 = dist_pair_to_pair
-    bbox_y1 = 0
-
-    new_w = vis_area_width
-    new_h = vis_area_height
-    pred_edge_img = np.ones((new_h, new_w, 3), dtype=np.uint8) * 255
-
-    nodes = result['nodes'].detach().cpu()
-    texts = result['img_metas'][0]['ori_texts']
-    num_nodes = result['nodes'].size(0)
-    edges = result['edges'].detach().cpu()[:, -1].view(num_nodes, num_nodes)
-
-    # (i, j) will be a valid pair
-    # either edge_score(node_i->node_j) > edge_thresh
-    # or edge_score(node_j->node_i) > edge_thresh
-    pairs = (torch.max(edges, edges.T) > edge_thresh).nonzero(as_tuple=True)
-    pairs = (pairs[0].numpy().tolist(), pairs[1].numpy().tolist())
-
-    # 1. "for n1, n2 in zip(*pairs) if n1 < n2":
-    #     Only (n1, n2) will be included if n1 < n2 but not (n2, n1), to
-    #     avoid duplication.
-    # 2. "(n1, n2) if nodes[n1, 1] > nodes[n1, 2]":
-    #     nodes[n1, 1] is the score that this node is predicted as key,
-    #     nodes[n1, 2] is the score that this node is predicted as value.
-    #     If nodes[n1, 1] > nodes[n1, 2], n1 will be the index of key,
-    #     so that n2 will be the index of value.
-    result_pairs = [(n1, n2) if nodes[n1, 1] > nodes[n1, 2] else (n2, n1)
-                    for n1, n2 in zip(*pairs) if n1 < n2]
-
-    result_pairs.sort()
-    result_pairs_score = [
-        torch.max(edges[n1, n2], edges[n2, n1]) for n1, n2 in result_pairs
-    ]
-
-    key_current_idx = -1
-    pos_current = (-1, -1)
-    newline_flag = False
-
-    key_font_size = 15
-    value_font_size = 15
-    key_font_color = (0, 0, 0)
-    value_font_color = (0, 0, 255)
-    arrow_color = (0, 0, 255)
-    score_color = (0, 255, 0)
-    for pair, pair_score in zip(result_pairs, result_pairs_score):
-        key_idx = pair[0]
-        if nodes[key_idx, 1] < keynode_thresh:
-            continue
-        if key_idx != key_current_idx:
-            # move y-coords down for a new key
-            bbox_y1 += 10
-            # enlarge blank area to show key-value info
-            if newline_flag:
-                bbox_x1 += vis_area_width
-                tmp_img = np.ones(
-                    (new_h, new_w + vis_area_width, 3), dtype=np.uint8) * 255
-                tmp_img[:new_h, :new_w] = pred_edge_img
-                pred_edge_img = tmp_img
-                new_w += vis_area_width
-                newline_flag = False
-                bbox_y1 = 10
-        key_text = texts[key_idx]
-        key_pos = (bbox_x1, bbox_y1)
-        value_idx = pair[1]
-        value_text = texts[value_idx]
-        value_pos = (bbox_x1 + dist_key_to_value, bbox_y1)
-        if key_idx != key_current_idx:
-            # draw text for a new key
-            key_current_idx = key_idx
-            pred_edge_img, text_sizes = draw_texts_by_pil(
-                pred_edge_img, [key_text],
-                draw_box=False,
-                on_ori_img=True,
-                font_size=key_font_size,
-                fill_color=key_font_color,
-                draw_pos=[key_pos],
-                return_text_size=True)
-            pos_right_bottom = (key_pos[0] + text_sizes[0][0],
-                                key_pos[1] + text_sizes[0][1])
-            pos_current = (pos_right_bottom[0] + 5, bbox_y1 + 10)
-            pred_edge_img = cv2.arrowedLine(
-                pred_edge_img, (pos_right_bottom[0] + 5, bbox_y1 + 10),
-                (bbox_x1 + dist_key_to_value - 5, bbox_y1 + 10), arrow_color,
-                1)
-            score_pos_x = int(
-                (pos_right_bottom[0] + bbox_x1 + dist_key_to_value) / 2.)
-            score_pos_y = bbox_y1 + 10 - int(key_font_size * 0.3)
-        else:
-            # draw arrow from key to value
-            if newline_flag:
-                tmp_img = np.ones((new_h + dist_pair_to_pair, new_w, 3),
-                                  dtype=np.uint8) * 255
-                tmp_img[:new_h, :new_w] = pred_edge_img
-                pred_edge_img = tmp_img
-                new_h += dist_pair_to_pair
-            pred_edge_img = cv2.arrowedLine(pred_edge_img, pos_current,
-                                            (bbox_x1 + dist_key_to_value - 5,
-                                             bbox_y1 + 10), arrow_color, 1)
-            score_pos_x = int(
-                (pos_current[0] + bbox_x1 + dist_key_to_value - 5) / 2.)
-            score_pos_y = int((pos_current[1] + bbox_y1 + 10) / 2.)
-        # draw edge score
-        cv2.putText(pred_edge_img, '{:.2f}'.format(pair_score),
-                    (score_pos_x, score_pos_y), cv2.FONT_HERSHEY_COMPLEX, 0.4,
-                    score_color)
-        # draw text for value
-        pred_edge_img = draw_texts_by_pil(
-            pred_edge_img, [value_text],
-            draw_box=False,
-            on_ori_img=True,
-            font_size=value_font_size,
-            fill_color=value_font_color,
-            draw_pos=[value_pos],
-            return_text_size=False)
-        bbox_y1 += dist_pair_to_pair
-        if bbox_y1 + dist_pair_to_pair >= new_h:
-            newline_flag = True
-
-    return pred_edge_img
-
-
-def imshow_edge(img,
-                result,
-                boxes,
-                show=False,
-                win_name='',
-                wait_time=-1,
-                out_file=None):
-    """Display the prediction results of the nodes and edges of the KIE model.
-
-    Args:
-        img (np.ndarray): The original image.
-        result (dict): The result of model forward_test, including:
-            - img_metas (list[dict]): List of meta information dictionary.
-            - nodes (Tensor): Node prediction with size: \
-                number_node * node_classes.
-            - edges (Tensor): Edge prediction with size: number_edge * 2.
-        boxes (list): The text boxes corresponding to the nodes.
-        show (bool): Whether to show the image. Default: False.
-        win_name (str): The window name. Default: ''
-        wait_time (float): Value of waitKey param. Default: 0.
-        out_file (str or None): The filename to write the image.
-            Default: None.
-
-    Returns:
-        np.ndarray: The image with key, value and relation drawn on it.
-    """
-    img = mmcv.imread(img)
-    h, w = img.shape[:2]
-    color_list = gen_color()
-
-    for i, box in enumerate(boxes):
-        new_box = [[box[0], box[1]], [box[2], box[1]], [box[2], box[3]],
-                   [box[0], box[3]]]
-        Pts = np.array([new_box], np.int32)
-        cv2.polylines(
-            img, [Pts.reshape((-1, 1, 2))],
-            True,
-            color=color_list[i % len(color_list)],
-            thickness=1)
-
-    pred_img_h = h
-    pred_img_w = w
-
-    pred_edge_img = draw_edge_result(img, result)
-    pred_img_h = max(pred_img_h, pred_edge_img.shape[0])
-    pred_img_w += pred_edge_img.shape[1]
-
-    vis_img = np.zeros((pred_img_h, pred_img_w, 3), dtype=np.uint8)
-    vis_img[:h, :w] = img
-    vis_img[:, w:] = 255
-
-    height_t, width_t = pred_edge_img.shape[:2]
-    vis_img[:height_t, w:(w + width_t)] = pred_edge_img
-
-    if show:
-        mmcv.imshow(vis_img, win_name, wait_time)
-    if out_file is not None:
-        mmcv.imwrite(vis_img, out_file)
-        res_dic = {
-            'boxes': boxes,
-            'nodes': result['nodes'].detach().cpu(),
-            'edges': result['edges'].detach().cpu(),
-            'metas': result['img_metas'][0]
-        }
-        mmcv.dump(res_dic, f'{out_file}_res.pkl')
-
-    return vis_img
+            closed = cv2.getWindowProperty(win_name, cv2.WND_PROP_VISIBLE) < 1
+            # if user closed window or if some key pressed
+            if closed or ret != -1:
+                break
+    else:
+        ret = cv2.waitKey(wait_time)

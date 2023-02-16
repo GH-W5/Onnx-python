@@ -15,8 +15,7 @@ from utils.fileio import list_from_file
 from utils.images_cutting import image_slide_cutting
 from utils.db_postprocessor import DBPostprocessor
 
-# import mmcv
-# from utils.visualize import det_recog_show_result
+from utils.visualize import det_recog_show_result
 
 Image.MAX_IMAGE_PIXELS = None
 
@@ -147,11 +146,17 @@ class OCRInference:
     mean = np.array([123.675, 116.28, 103.53])
     std = np.array([58.395, 57.12, 57.375])
 
-    def __init__(self, det_model_path, seg_model_path, keys, device='CPUExecutionProvider'):
+    def __init__(self, det_model_path=None, seg_model_path=None, keys=None, device='CPUExecutionProvider', show=False):
+        if det_model_path is None:
+            det_model_path = ''
+        if seg_model_path is None or keys is None:
+            seg_model_path = ''
+            keys = ''
         self.det_model = onnxruntime.InferenceSession(det_model_path, providers=[device])
         self.ocr_seg_infer = OCRSeg(seg_model_path, keys)
         # 文字定位模型后处理，获取预测的文本边界
         self.dbnet_post = DBPostprocessor(text_repr_type='quad')
+        self.show = show
         self.model_name = "OCRInference"
         self.logger = self.get_logger()
         self.logger.info('开始'.center(50, '='))
@@ -231,8 +236,8 @@ class OCRInference:
             box_res['text'] = text
             box_res['text_score'] = text_score
             img_e2e_res.append(box_res)
-
-        # det_recog_show_result(img_path, img_e2e_res)
+        if self.show:
+            det_recog_show_result(img_path, img_e2e_res)
         self.export_json(img_e2e_res, output_path)
 
     def export_json(self, img_e2e_res, export):
@@ -279,13 +284,13 @@ class OCRInference:
 
 
 if __name__ == '__main__':
-    det_model_path = 'E:/datasets/ocr/kqrs_train/train_data/DbNet_r18/end2end.onnx'
-    seg_model_path = 'E:/datasets/ocr/kqrs_train/train_data/Sar_r31/end2end.onnx'
-    keys = 'E:/datasets/ocr/kqrs_train/train_data/Sar_r31/keys.txt'
+    det_model_path = 'E:/ocr8.5/train_data/DbNet_r18/end2end.onnx'
+    seg_model_path = 'E:/ocr8.5/train_data/Sar_r31/end2end.onnx'
+    keys = 'E:/ocr8.5/train_data/Sar_r31/keys.txt'
     img_dir = 'F:/workspace/mmocr_api/data/orc_test2.jpg'
     seg_img_path = 'F:/workspace/mmocr_api/data/王贵/2.png'
 
-    ocr_infer = OCRInference(det_model_path, seg_model_path, keys)
+    ocr_infer = OCRInference(det_model_path, seg_model_path, keys, show=True)
     ocr_infer(img_dir)
 
     # ocr_seg_infer = OCRSeg(seg_model_path, keys)
